@@ -72,23 +72,27 @@ function EquityChart({ data }: { data: DashboardData['equityCurve'] }) {
   const path = `M ${points.join(' L ')}`;
   const area = `${path} L ${width},${height} L 0,${height} Z`;
   return <svg className="equity-svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="Equity curve">
-    <defs><linearGradient id="equity-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#55dbb2" stopOpacity=".22"/><stop offset="100%" stopColor="#55dbb2" stopOpacity="0"/></linearGradient></defs>
-    {[0, 1, 2, 3].map((line) => <line key={line} x1="0" x2={width} y1={line * (height / 3)} y2={line * (height / 3)} stroke="#25303c" strokeDasharray="3 6"/>)}
-    <path d={area} fill="url(#equity-fill)"/><path d={path} fill="none" stroke="#5ee0b9" strokeWidth="2.5" vectorEffect="non-scaling-stroke"/>
+    <defs>
+      <linearGradient id="equity-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#52d8b1" stopOpacity=".34"/><stop offset="55%" stopColor="#6ea9ff" stopOpacity=".12"/><stop offset="100%" stopColor="#b799ff" stopOpacity="0"/></linearGradient>
+      <linearGradient id="equity-stroke" gradientUnits="userSpaceOnUse" x1="0" x2={width} y1="0" y2="0"><stop offset="0%" stopColor="#52d8b1"/><stop offset="50%" stopColor="#6ea9ff"/><stop offset="100%" stopColor="#b799ff"/></linearGradient>
+    </defs>
+    {[0, 1, 2, 3].map((line) => <line key={line} x1="0" x2={width} y1={line * (height / 3)} y2={line * (height / 3)} stroke="#2a3644" strokeDasharray="3 6"/>)}
+    <path className="equity-area" d={area} fill="url(#equity-fill)"/>
+    <path className="equity-line" d={path} fill="none" stroke="url(#equity-stroke)" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke"/>
   </svg>;
 }
 
 function MetricCard({ label, value, sub, icon, tone = 'teal', trend }: { label: string; value: string; sub: string; icon: string; tone?: string; trend?: string }) {
-  return <article className="metric-card">
+  return <article className={`metric-card ${tone}`}>
     <div className={`metric-icon ${tone}`}><Glyph name={icon} size={18}/></div>
     <div className="metric-label">{label}</div>
-    <div className="metric-value-row"><strong>{value}</strong>{trend && <span className="metric-trend">{trend}</span>}</div>
+    <div className="metric-value-row"><strong key={value} className="value-tick">{value}</strong>{trend && <span className="metric-trend">{trend}</span>}</div>
     <div className="metric-sub">{sub}</div>
   </article>;
 }
 
 function NavButton({ name, label, active, onClick }: { name: string; label: string; active: boolean; onClick: () => void }) {
-  return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><Glyph name={name} size={17}/><span>{label}</span>{active && <span className="nav-active"/>}</button>;
+  return <button className={`nav-item ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined} onClick={onClick}><Glyph name={name} size={17}/><span>{label}</span>{active && <span className="nav-active"/>}</button>;
 }
 
 function LoginScreen({ onToken }: { onToken: (value: string) => void }) {
@@ -114,7 +118,7 @@ function PositionTable({ data }: { data: DashboardData }) {
     <tbody>{data.positions.map((position) => <tr key={position.id}>
       <td><span className="symbol-cell"><span className="coin-avatar">{position.symbol.slice(0, 1)}</span><strong>{position.symbol.replace('_USDT', '')}</strong><small>USDT perp</small></span></td>
       <td><span className={`side-badge ${position.direction.toLowerCase()}`}>{position.direction}</span></td>
-      <td>{money(position.quantity, 4)} <small>{position.source === 'PAPER' ? 'contracts' : 'contracts'}</small></td>
+      <td>{money(position.quantity, 4)} <small>contracts</small></td>
       <td>${money(position.entryPrice, 4)}</td>
       <td>${money(position.currentPrice, 4)}</td>
       <td><span className="protect-cell"><span className="stop">${money(position.stopPrice, 4)}</span><i/><span className="target">${money(position.takeProfitPrice, 4)}</span></span></td>
@@ -179,7 +183,12 @@ function StatusBanner({ data }: { data: DashboardData }) {
   return <div className="banner success"><Glyph name="check"/><div><strong>Paper engine is monitoring</strong><span>Market data is streamed from MEXC. Simulated fills only — the exchange receives no orders.</span></div></div>;
 }
 
+const CHART_PERIODS = { ALL: Infinity, '1D': 86_400_000, '1W': 604_800_000, '1M': 2_592_000_000 } as const;
+type ChartPeriod = keyof typeof CHART_PERIODS;
+
 function Overview({ data, action, loading }: { data: DashboardData; action: (path: string, body?: unknown) => Promise<void>; loading: string | null }) {
+  const [period, setPeriod] = useState<ChartPeriod>('ALL');
+  const curve = data.equityCurve.filter((point) => point.timestamp >= Date.now() - CHART_PERIODS[period]);
   const drawdownPct = data.account.dailyStartingEquity > 0 ? data.account.dailyDrawdown / data.account.dailyStartingEquity * 100 : 0;
   const riskPct = data.account.equity > 0 ? data.account.aggregateRisk / data.account.equity * 100 : 0;
   const connected = data.marketStream.connected;
@@ -203,10 +212,10 @@ function Overview({ data, action, loading }: { data: DashboardData; action: (pat
 
     <div className="content-grid top-grid">
       <section className="panel chart-panel">
-        <div className="panel-head"><div><div className="panel-title">Equity overview</div><div className="panel-subtitle">Account value · fees and funding reflected</div></div><div className="chart-period"><span className="selected">ALL</span><span>1D</span><span>1W</span><span>1M</span></div></div>
+        <div className="panel-head"><div><div className="panel-title">Equity overview</div><div className="panel-subtitle">Account value · fees and funding reflected</div></div><div className="chart-period" role="group" aria-label="Equity chart period">{(Object.keys(CHART_PERIODS) as ChartPeriod[]).map((key) => <button key={key} type="button" className={period === key ? 'selected' : ''} aria-pressed={period === key} onClick={() => setPeriod(key)}>{key}</button>)}</div></div>
         <div className="chart-summary"><strong>{data.account.source === 'UNSYNCED' ? '—' : `$${money(data.account.equity)}`}</strong><span className={data.performance.netPnl >= 0 ? 'positive' : 'negative'}>{signedMoney(data.performance.netPnl)} <small>realized net</small></span></div>
-        <div className="chart-frame"><EquityChart data={data.equityCurve}/></div>
-        <div className="chart-axis"><span>{data.equityCurve.length ? new Date(data.equityCurve[0]!.timestamp).toLocaleDateString() : 'No snapshots'}</span><span>{data.equityCurve.length ? shortTime(data.equityCurve.at(-1)?.timestamp) : 'Awaiting first minute'}</span></div>
+        <div className="chart-frame"><EquityChart data={curve}/></div>
+        <div className="chart-axis"><span>{curve.length ? new Date(curve[0]!.timestamp).toLocaleDateString() : 'No snapshots'}</span><span>{curve.length ? shortTime(curve.at(-1)?.timestamp) : 'Awaiting first minute'}</span></div>
       </section>
       <section className="panel portfolio-panel">
         <div className="panel-head"><div><div className="panel-title">Portfolio exposure</div><div className="panel-subtitle">Hard limit · {data.config.maxSimultaneousPositions} positions</div></div><span className="count-pill">{openCount}<i>/</i>{data.config.maxSimultaneousPositions}</span></div>
@@ -412,7 +421,7 @@ function BacktestScreen() {
     <div className="page-intro"><div className="eyebrow">RESEARCH WORKSPACE</div><h1>Historical backtesting</h1><p>Chronological 60 / 20 / 20 development, validation, and untouched out-of-sample splits. Same indicator and risk modules as paper mode.</p></div>
     <div className="backtest-grid">
       <section className="panel upload-panel"><div className="panel-head"><div><div className="panel-title">Historical MEXC 1-minute candles</div><div className="panel-subtitle">Upload local CSV or download data with the CLI</div></div><span className="csv-tag">OHLCV CSV</span></div>
-        <label className={`file-drop ${barsBySymbol ? 'loaded' : ''}`} htmlFor="backtest-file"><span className="file-drop-icon"><Glyph name={barsBySymbol ? 'check' : 'upload'} size={20}/></span><strong>{fileName || 'Choose a candle CSV'}</strong><span>{barsBySymbol ? `${Object.keys(barsBySymbol).length} symbols · ${Object.values(barsBySymbol).reduce((sum, bars) => sum + bars.length, 0).toLocaleString()} rows` : 'symbol, openTime, open, high, low, close, volume, complete, fundingRate'}</span><input id="backtest-file" type="file" accept=".csv,text/csv" onChange={(event) => void readFile(event.target.files?.[0])}/></label>
+        <label className={`file-drop ${barsBySymbol ? 'loaded' : ''}`} htmlFor="backtest-file"><span className="file-drop-icon"><Glyph name={barsBySymbol ? 'check' : 'upload'} size={20}/></span><strong>{fileName || 'Choose a candle CSV'}</strong><span>{barsBySymbol ? `${Object.keys(barsBySymbol).length} symbols · ${Object.values(barsBySymbol).reduce((sum, bars) => sum + bars.length, 0).toLocaleString()} rows` : 'symbol, openTime, open, high, low, close, volume, complete, fundingRate'}</span><input id="backtest-file" type="file" accept=".csv,text/csv" onChange={(event) => { void readFile(event.target.files?.[0]); event.target.value = ''; }}/></label>
         <div className="form-row"><label>Initial equity (USDT)<input type="number" min="1" value={equity} onChange={(event) => setEquity(event.target.value)}/></label><label>Assumed full spread (bps)<input type="number" min="0" step="0.5" value={spreadBps} onChange={(event) => setSpreadBps(event.target.value)}/></label></div>
         <div className="data-note"><Glyph name="alert" size={14}/><span>For an auditable exchange backtest, include MEXC contract metadata and funding fields. Missing contract metadata uses a labeled 1.0 synthetic multiplier. Historical order-book spread, queue priority, mark-price liquidation, and actual fees are not in OHLCV.</span></div>
         {error && <div className="inline-error"><Glyph name="alert" size={14}/>{error}</div>}
@@ -555,7 +564,7 @@ function App() {
         <button className="icon-button top-refresh" onClick={() => void refresh()} aria-label="Refresh dashboard"><Glyph name="refresh" size={16}/></button>
         <span className="last-refresh">{lastUpdated ? shortTime(lastUpdated) : '—'}</span>
       </div></header>
-      <div className="page-content">
+      <div className="page-content" key={section}>
         {section === 'overview' && <>
           <div className="page-heading"><div><div className="eyebrow">MEXC FUTURES · 1-MINUTE SCANNER</div><h1>Control center</h1><p>Risk-first execution overview for your configured USDT perpetual contracts.</p></div><div className="heading-actions"><span className={`environment-badge ${data.mode.toLowerCase()}`}><i/>{data.mode === 'PAPER' ? 'PAPER ENVIRONMENT' : 'LIVE EXECUTION'}</span><span className="updated-label">Updated {shortTime(data.updatedAt)}</span></div></div>
           <Overview data={data} action={action} loading={loading}/>
