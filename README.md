@@ -142,6 +142,16 @@ API routes are under `/api`; all routes except `/api/health` require the dashboa
 
 All dashboard actions go through backend guards; no exchange order keys or raw order-create route are exposed to the browser.
 
+### MEXC API key settings
+
+The dashboard's **Settings** page accepts the MEXC API key and secret. The browser sends them once over the operator-authenticated API; the server never returns the secret and shows only a masked key preview.
+
+- `GET /api/settings/mexc-credentials` returns status only (configured flags, masked key, source).
+- `PUT /api/settings/mexc-credentials` with `{"apiKey","apiSecret"}` saves them.
+- `DELETE /api/settings/mexc-credentials` removes the saved pair and falls back to `MEXC_API_KEY` / `MEXC_API_SECRET` if set.
+
+Saved credentials are encrypted with AES-256-GCM only when `CREDENTIAL_ENCRYPTION_KEY` is set on the server. Without it they live in server memory until restart. Changing credentials is refused while live trading is active or live positions are open. Use `DASHBOARD_API_TOKEN` in any networked deployment, because these routes can overwrite exchange credentials.
+
 ## Validation status and limitations
 
 `npm run typecheck`, `npm test`, and `npm run build` are the local verification checks. Tests cover indicator math, closed-candle decisions, sizing/limits, daily-lock latching, MEXC request signing and no-retry order behavior, persistence, paper/live gate behavior, restart pausing, and backtest reporting. They do **not** establish that MEXC will accept every request, that an exchange-side stop will trigger/fill as expected, or that any trading strategy will be profitable. No live order should be attempted without separate explicit authorization and real-account safety validation.

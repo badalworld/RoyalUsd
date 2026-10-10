@@ -490,6 +490,11 @@ export class TradingRuntime {
     }
   }
 
+  /** True while live trading is active or live exposure is still open; credentials must not change then. */
+  isLiveActive(): boolean {
+    return this.state.mode === 'LIVE' && (this.state.running || this.state.positions.length > 0);
+  }
+
   async enableLive(confirmation: string): Promise<void> {
     await this.initialize();
     if (confirmation !== 'ENABLE LIVE TRADING') throw new Error('Confirmation must exactly match ENABLE LIVE TRADING.');

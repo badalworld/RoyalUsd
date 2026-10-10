@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import type { BacktestReport, Candle } from '../src/core/types.js';
 import type { DashboardData, DashboardMarket } from '../src/server/runtime.js';
 
-type Section = 'overview' | 'backtest' | 'risk' | 'activity';
+type Section = 'overview' | 'backtest' | 'risk' | 'activity' | 'settings';
+
+interface CredentialStatus {
+  apiKeyConfigured: boolean;
+  apiSecretConfigured: boolean;
+  apiKeyPreview: string | null;
+  source: 'settings' | 'environment' | 'none';
+  persistent: boolean;
+  storedRecordUnreadable: boolean;
+}
 
 const money = (value: number, digits = 2) => Number.isFinite(value)
   ? new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value)
@@ -463,6 +472,84 @@ function ActivityScreen({ data }: { data: DashboardData }) {
   </div>;
 }
 
+function SettingsScreen({ onChanged }: { onChanged: () => void }) {
+  const [status, setStatus] = useState<CredentialStatus | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [apiSecret, setApiSecret] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await apiRequest<CredentialStatus>('/api/settings/mexc-credentials'));
+    } catch (cause) {
+      setMessage({ tone: 'error', text: cause instanceof Error ? cause.message : 'Unable to load settings.' });
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage(null);
+    try {
+      const next = await apiRequest<CredentialStatus>('/api/settings/mexc-credentials', {
+        method: 'PUT', body: JSON.stringify({ apiKey, apiSecret }),
+      });
+      setStatus(next);
+      setApiKey('');
+      setApiSecret('');
+      setMessage({ tone: 'ok', text: next.persistent ? 'API credentials saved (encrypted at rest).' : 'API credentials applied for this server session. Set CREDENTIAL_ENCRYPTION_KEY to keep them across restarts.' });
+      onChanged();
+    } catch (cause) {
+      setMessage({ tone: 'error', text: cause instanceof Error ? cause.message : 'Unable to save credentials.' });
+    } finally { setBusy(false); }
+  }
+
+  async function clearSaved() {
+    if (!window.confirm('Remove the API key and secret saved from this page? Environment variables, if any, will be used instead.')) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      setStatus(await apiRequest<CredentialStatus>('/api/settings/mexc-credentials', { method: 'DELETE' }));
+      setMessage({ tone: 'ok', text: 'Saved credentials removed.' });
+      onChanged();
+    } catch (cause) {
+      setMessage({ tone: 'error', text: cause instanceof Error ? cause.message : 'Unable to remove credentials.' });
+    } finally { setBusy(false); }
+  }
+
+  const ready = Boolean(status?.apiKeyConfigured && status?.apiSecretConfigured);
+  const canSave = apiKey.trim().length > 0 && apiSecret.trim().length > 0 && !busy;
+
+  return <div className="risk-screen">
+    <div className="page-intro"><div className="eyebrow">CONNECTIONS</div><h1>Settings</h1><p>Add your MEXC Futures API key and secret. They are sent to the server only, never returned to the browser, and never shown again after saving.</p></div>
+    <section className="panel">
+      <div className="panel-head"><div><div className="panel-title">MEXC API credentials</div><div className="panel-subtitle">Use a key with futures trading permission only. Withdrawal permission must stay disabled.</div></div>
+        <span className={`pill-status ${ready ? 'running' : 'muted'}`}><StatusDot status={ready ? 'RUNNING' : 'IDLE'}/>{ready ? 'Configured' : 'Not configured'}</span></div>
+      <div className="risk-meta-row">
+        <span>API key: {status?.apiKeyPreview ?? 'not set'}</span>
+        <span>Secret: {status?.apiSecretConfigured ? 'stored (hidden)' : 'not set'}</span>
+        <span>Source: {status?.source === 'settings' ? 'saved in settings' : status?.source === 'environment' ? 'environment variables' : 'none'}</span>
+      </div>
+      {status?.storedRecordUnreadable && <div className="report-warning"><Glyph name="alert" size={14}/>Saved credentials could not be decrypted with the current CREDENTIAL_ENCRYPTION_KEY. Re-enter them below.</div>}
+      <form className="settings-form" onSubmit={(event) => void save(event)} autoComplete="off">
+        <label htmlFor="mexc-api-key">API key</label>
+        <input id="mexc-api-key" name="mexc-api-key" type="text" autoComplete="off" spellCheck={false} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste MEXC API key"/>
+        <label htmlFor="mexc-api-secret">API secret</label>
+        <input id="mexc-api-secret" name="mexc-api-secret" type="password" autoComplete="new-password" spellCheck={false} value={apiSecret} onChange={(event) => setApiSecret(event.target.value)} placeholder="Paste MEXC API secret"/>
+        <div className="settings-actions">
+          <button className="button primary" type="submit" disabled={!canSave}>{busy ? 'Saving…' : 'Save credentials'}</button>
+          {status?.source === 'settings' && <button className="button subtle" type="button" disabled={busy} onClick={() => void clearSaved()}>Remove saved credentials</button>}
+        </div>
+      </form>
+      {message && <div className={message.tone === 'ok' ? 'risk-meta-row' : 'report-warning'}><span>{message.text}</span></div>}
+      <div className="login-safe"><Glyph name="lock" size={14}/> Credentials cannot be changed while live trading is active.</div>
+    </section>
+  </div>;
+}
+
 function App() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [section, setSection] = useState<Section>('overview');
@@ -494,7 +581,7 @@ function App() {
   useEffect(() => {
     const listener = (event: Event) => {
       const target = (event as CustomEvent<Section>).detail;
-      if (['overview', 'backtest', 'risk', 'activity'].includes(target)) setSection(target);
+      if (['overview', 'backtest', 'risk', 'activity', 'settings'].includes(target)) setSection(target);
     };
     const authListener = () => setAuthRequired(true);
     window.addEventListener('royalusd-navigate', listener);
@@ -535,7 +622,7 @@ function App() {
     setAuthRequired(true);
   };
 
-  const title = section === 'overview' ? 'Control center' : section === 'backtest' ? 'Backtesting' : section === 'risk' ? 'Risk & safety' : 'Trading activity';
+  const title = section === 'overview' ? 'Control center' : section === 'backtest' ? 'Backtesting' : section === 'risk' ? 'Risk & safety' : section === 'settings' ? 'Settings' : 'Trading activity';
   const initials = data?.mode === 'LIVE' ? 'LIVE' : 'PAPER';
   const select = (next: Section) => setSection(next);
 
@@ -551,6 +638,10 @@ function App() {
         <NavButton name="backtest" label="Backtesting" active={section === 'backtest'} onClick={() => select('backtest')}/>
         <NavButton name="shield" label="Risk & safety" active={section === 'risk'} onClick={() => select('risk')}/>
         <NavButton name="activity" label="Activity log" active={section === 'activity'} onClick={() => select('activity')}/>
+      </nav>
+      <div className="sidebar-section-label">SYSTEM</div>
+      <nav className="nav-list">
+        <NavButton name="settings" label="Settings" active={section === 'settings'} onClick={() => select('settings')}/>
       </nav>
       <div className="sidebar-bottom">
         <div className="sidebar-live-card"><div className="live-card-head"><span className="live-dot"/>TRADING MODE</div><strong>{initials}</strong><span>{data.mode === 'PAPER' ? 'Simulated execution only' : 'Real exchange orders'}</span></div>
@@ -572,6 +663,7 @@ function App() {
         {section === 'backtest' && <BacktestScreen/>}
         {section === 'risk' && <RiskScreen data={data} action={action} loading={loading}/>}
         {section === 'activity' && <ActivityScreen data={data}/>}
+        {section === 'settings' && <SettingsScreen onChanged={() => void refresh()}/>}
       </div>
       <footer className="app-footer"><span>Royal USD <i>·</i> MEXC Futures</span><span>Indicators run on completed 1-minute candles <i>·</i> No profit guarantee</span></footer>
     </main>

@@ -8,6 +8,7 @@ import { runBacktest } from '../core/backtest.js';
 import type { BacktestInput } from '../core/backtest.js';
 import type { BacktestReport, Candle, ContractSpec } from '../core/types.js';
 import { MexcFuturesAdapter } from '../exchange/mexc.js';
+import { CredentialManager, validateMexcCredentials } from './credentials.js';
 import { TradingRuntime } from './runtime.js';
 import { createStore } from './store.js';
 
@@ -16,11 +17,20 @@ if (config.nodeEnv === 'production' && !config.live.dashboardTokenConfigured) {
   throw new Error('DASHBOARD_API_TOKEN must be configured before starting in production.');
 }
 const store = await createStore({ databaseUrl: config.databaseUrl, sqlitePath: config.sqlitePath });
+const credentials = new CredentialManager(
+  store,
+  { apiKey: process.env.MEXC_API_KEY, apiSecret: process.env.MEXC_API_SECRET },
+  process.env.CREDENTIAL_ENCRYPTION_KEY,
+);
+await credentials.load();
+const activeCredentials = credentials.current();
 const exchange = new MexcFuturesAdapter({
   baseUrl: config.mexcRestUrl,
-  apiKey: process.env.MEXC_API_KEY?.trim(),
-  apiSecret: process.env.MEXC_API_SECRET?.trim(),
+  apiKey: activeCredentials?.apiKey,
+  apiSecret: activeCredentials?.apiSecret,
 });
+config.live.hasApiKey = Boolean(activeCredentials?.apiKey);
+config.live.hasApiSecret = Boolean(activeCredentials?.apiSecret);
 const runtime = new TradingRuntime(config, store, exchange);
 await runtime.initialize();
 
@@ -145,6 +155,33 @@ app.get('/api/events', requireAuth, asyncRoute(async (request, response) => {
   const type = typeof request.query.type === 'string' ? request.query.type : undefined;
   const symbol = typeof request.query.symbol === 'string' ? request.query.symbol : undefined;
   response.json(await store.listEvents({ limit, type, symbol }));
+}));
+
+app.get('/api/settings/mexc-credentials', requireAuth, (_request, response) => {
+  response.json(credentials.status());
+});
+
+app.put('/api/settings/mexc-credentials', requireAuth, rateLimit, asyncRoute(async (request, response) => {
+  const body = requireObjectBody(request);
+  if (runtime.isLiveActive()) throw new Error('Stop live trading and close live positions before changing API credentials.');
+  const next = validateMexcCredentials({ apiKey: body.apiKey, apiSecret: body.apiSecret });
+  await credentials.save(next);
+  exchange.setCredentials(next.apiKey, next.apiSecret);
+  config.live.hasApiKey = true;
+  config.live.hasApiSecret = true;
+  await store.appendEvent({ type: 'settings.credentials.updated', occurredAt: Date.now(), payload: { source: 'settings', persistent: credentials.persistent } });
+  response.json(credentials.status());
+}));
+
+app.delete('/api/settings/mexc-credentials', requireAuth, rateLimit, asyncRoute(async (_request, response) => {
+  if (runtime.isLiveActive()) throw new Error('Stop live trading and close live positions before removing API credentials.');
+  await credentials.clear();
+  const fallback = credentials.current();
+  exchange.setCredentials(fallback?.apiKey, fallback?.apiSecret);
+  config.live.hasApiKey = Boolean(fallback?.apiKey);
+  config.live.hasApiSecret = Boolean(fallback?.apiSecret);
+  await store.appendEvent({ type: 'settings.credentials.removed', occurredAt: Date.now(), payload: { fallback: credentials.status().source } });
+  response.json(credentials.status());
 }));
 
 app.post('/api/paper/start', requireAuth, rateLimit, asyncRoute(async (_request, response) => {
