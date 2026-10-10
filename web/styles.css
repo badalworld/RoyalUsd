@@ -739,3 +739,11 @@ tbody tr:hover { background: linear-gradient(90deg, rgba(95, 212, 255, .08), rgb
   .app-footer { align-items: flex-start; flex-direction: column; gap: 5px; padding: 10px 13px; font-size: 7px; }
   .disclaimer { font-size: 9px; }
 }
+
+/* Settings: MEXC credential form */
+.settings-form { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 12px 16px; margin-top: 18px; max-width: 640px; }
+.settings-form label { font-size: 11px; font-weight: 600; letter-spacing: .04em; color: #9fb0c3; }
+.settings-form input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 6px; border: 1px solid #2a3644; background: #0f1620; color: inherit; font: inherit; font-size: 13px; }
+.settings-form input:focus { outline: none; border-color: #52d8b1; }
+.settings-actions { grid-column: 2; display: flex; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 640px) { .settings-form { grid-template-columns: 1fr; } .settings-actions { grid-column: 1; } }

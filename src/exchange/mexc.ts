@@ -139,8 +139,8 @@ class RequestGate {
 
 export class MexcFuturesAdapter {
   readonly baseUrl: string;
-  private readonly apiKey?: string;
-  private readonly apiSecret?: string;
+  private apiKey?: string;
+  private apiSecret?: string;
   private readonly recvWindowMs: number;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
@@ -157,6 +157,12 @@ export class MexcFuturesAdapter {
 
   get credentialsConfigured(): boolean {
     return Boolean(this.apiKey && this.apiSecret);
+  }
+
+  /** Swap signing credentials in place. Callers must not do this while live orders are being managed. */
+  setCredentials(apiKey: string | undefined, apiSecret: string | undefined): void {
+    this.apiKey = apiKey?.trim() || undefined;
+    this.apiSecret = apiSecret?.trim() || undefined;
   }
 
   private async request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, params: Record<string, unknown> = {}, signed = false): Promise<T> {
